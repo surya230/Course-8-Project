@@ -1,0 +1,115 @@
+---
+title: "JHU Data Science Course 8 - Machine Learning Assignment"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Executive Summary
+
+This report presents a brief analysis of a specific form of model prediction. Based on data from a multi-participant weight lifting exercise experiment, a Random Forest algorithm is used to classify and then predict a particular output variable. This variable quantifies the participants' The current analysis demonstrates a 99.8% prediction accuracy.
+
+## Background 
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement. 
+
+One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, the goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. 
+
+Summarizing from the website http://groupware.les.inf.puc-rio.br/har :
+
+Six young health participants were asked to perform one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl in five different fashions: exactly according to the specification (Class A), throwing the elbows to the front (Class B), lifting the dumbbell only halfway (Class C), lowering the dumbbell only halfway (Class D) and throwing the hips to the front (Class E).
+
+Thus, Class A corresponds to the specified execution of the exercise, while the other 4 classes correspond to common mistakes.
+
+## Exploratory Data Analysis
+
+Let's take a look at the provided training and testing data. We see that the data consists of 19,622 observations of 160 variables. In particular, the distribution of the CLASSE variable is shown.
+
+```{r, echo=TRUE}
+options( warn = -1 )
+library(ggplot2)
+library(caret)
+library(randomForest)
+setwd("C:/Data Analytics/Coursera - Data Science (JHU)/Course 8/Project")
+
+training_data <- read.csv("pml-training.csv", stringsAsFactors = FALSE )
+
+str( training_data, list.len = 20 )
+table( training_data$classe )
+sum( table( training_data$classe ) )
+```
+
+## Data Pre-processing: Cleaning & Formatting
+
+Before doing any modeling, we can discard the first 6 informational columns and the last one, which contains the CLASSE variable. After converting any CHAR in the remaining data to NUMERIC, we convert the resulting MATRIX to a DATA FRAME, and convert any NA to 0, and finally attach the saved CLASSE column as CHAR.
+
+```{r, echo=TRUE}
+classe <- training_data$classe
+training_data <- as.data.frame( sapply( training_data[,7:159], as.numeric ))
+training_data[ is.na(training_data) ] <- 0L
+training_data <- cbind( training_data, classe )
+```
+
+Next, we split the training data into two partitions, choosing 75% to train and 25% to test. This allows an out-of-sample error to be estimated. (Note that we are saving the actual 20-sample test data for later use.)
+
+```{r, echo=TRUE}
+inTrain  <- createDataPartition( y = training_data$classe, p = 0.75, list = FALSE )
+trainClasse <- training_data[ inTrain, ]
+testClasse  <- training_data[-inTrain, ]
+
+dim(trainClasse)
+dim(testClasse)
+str( trainClasse, list.len = 40 )
+```
+
+## Classification & Cross-Validation
+
+The Random Forest classification algorithm for decision trees can now be performed. This algorithm is known to be generally proficient at avoiding the  over-fitting of data.  The resulting confusion matrix and Gini plot are shown.
+
+```{r, echo=TRUE}
+mrf <- randomForest( trainClasse$classe ~ ., data = trainClasse ) 
+print( mrf )
+varImpPlot( mrf )
+```
+
+The Gini plot indicates that we could try to make use of only a subset of the 53 predictor variables, perhaps taking only the top 10 variables. With this reduced set of predictors, we can re-run the Random Forest algorithm, this time including a 5-fold cross-validation to improve accuracy. (The default setting of 10-fold is noticeably more time-consuming.)
+
+```{r, echo=TRUE}
+mrf_cv <- train( classe ~ num_window + roll_belt + yaw_belt + magnet_dumbbell_z + pitch_forearm 
+            + magnet_dumbbell_y + pitch_belt + roll_forearm + magnet_dumbbell_x + accel_belt_z, 
+            data = trainClasse, method = "rf", trControl = trainControl(method = "cv", number = 5) )
+print( mrf_cv, digits = 5 )
+```
+
+Now we can perfom the prediction, and the resulting confusion matrix (shown here in absolute numbers as well as in percentage terms) may be examined as an accuracy indicator. We can see that a 99.73% accuracy is reported, implying an out-of-sample error of 1.0 - 0.9986 = 0.14%. This seems to be a fairly low error.
+
+```{r, echo=TRUE}
+mrf_pred <- predict( mrf_cv, newdata = testClasse )
+mrf_CM   <- confusionMatrix( mrf_pred, testClasse$classe )
+
+table( mrf_pred )
+sum( table( mrf_pred ))
+mrf_CM$table
+prop.table( mrf_CM$table )
+mrf_CM$overall[1]
+```
+
+## Predictions on Test Data
+
+Applying our final model to the 20-sample test data (after first pre-processing the test data in the same manner as for the original training data) gives the following table for the CLASSE predction:
+
+```{r, echo=TRUE}
+setwd("C:/Data Analytics/Coursera - Data Science (JHU)/Course 8/Project")
+testing_data  <- read.csv("pml-testing.csv" , stringsAsFactors = FALSE )
+pid <- testing_data$problem_id
+testing_data <- as.data.frame( sapply( testing_data[,7:159], as.numeric ))
+testing_data[ is.na(testing_data) ] <- 0L
+testing_data <- cbind( testing_data, pid )
+
+predictions_20 <- predict( mrf_cv, newdata = testing_data )
+data.frame( pid, predictions_20 )
+```
